@@ -1,8 +1,8 @@
-const TelegramBot = require("node-telegram-bot-api");
+const { Telegraf, Markup } = require('telegraf');
 
 // Bot token from BotFather
 const token = "7724923753:AAFi3uE0kJj7xwaTPEQjCBHglSf9vInNPjs";
-const bot = new TelegramBot(token, { polling: true });
+const bot = new Telegraf(token);
 
 // Вопросы и ответы в стиле Сони Мармеладовой
 const quizData = [
@@ -182,19 +182,13 @@ function createQuestionsReplyKeyboard() {
   // Qo'shimcha tugmalar
   keyboard.push(["🔄 Показать меню", "📊 Статистика"]);
 
-  return {
-    reply_markup: {
-      keyboard: keyboard,
-      resize_keyboard: true,
-      one_time_keyboard: false,
-    },
-  };
+  return Markup.keyboard(keyboard).resize();
 }
 
 // /start команда
-bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
-  const firstName = msg.from.first_name || "Пользователь";
+bot.start((ctx) => {
+  const firstName = ctx.from.first_name || "Пользователь";
+  const chatId = ctx.chat.id;
 
   // Инициализация состояния пользователя
   userStates[chatId] = {
@@ -209,96 +203,15 @@ bot.onText(/\/start/, (msg) => {
 
 Выбери вопрос из меню ниже! 👇`;
 
-  bot.sendMessage(chatId, welcomeMessage, createQuestionsReplyKeyboard());
+  ctx.reply(welcomeMessage, createQuestionsReplyKeyboard());
 });
 
-// Показать список всех вопросов
-function showQuestionsList(chatId, messageId = null) {
-  const questionsMessage = `🤔 **Выберите вопрос:**
-
-Что бы вы хотели узнать?`;
-
-  const options = {
-    parse_mode: "Markdown",
-    ...createQuestionsKeyboard(),
-  };
-
-  if (messageId) {
-    bot.editMessageText(questionsMessage, {
-      chat_id: chatId,
-      message_id: messageId,
-      ...options,
-    });
-  } else {
-    bot.sendMessage(chatId, questionsMessage, options);
-  }
-}
-
-// Callback query handler
-bot.on("callback_query", (callbackQuery) => {
-  const chatId = callbackQuery.message.chat.id;
-  const messageId = callbackQuery.message.message_id;
-  const data = callbackQuery.data;
-
-  if (data === "show_questions") {
-    bot.answerCallbackQuery(callbackQuery.id);
-    showQuestionsList(chatId, messageId);
-    return;
-  }
-
-  if (data.startsWith("q_")) {
-    const questionId = parseInt(data.split("_")[1]);
-    const currentQuestion = quizData.find((q) => q.id === questionId);
-
-    if (!currentQuestion) {
-      bot.answerCallbackQuery(callbackQuery.id, { text: "Ошибка!" });
-      return;
-    }
-
-    // Получаем случайный ответ на выбранный вопрос
-    const randomAnswer = getRandomAnswer(currentQuestion.answers);
-
-    // Увеличиваем счетчик
-    userStates[chatId].questionsAnswered++;
-
-    const resultMessage = `💬 **${currentQuestion.question}**
-
-💭 *${randomAnswer}*
-
-`;
-
-    // Кнопки для продолжения
-    const nextQuestionKeyboard = {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "🤔 Задать еще вопрос", callback_data: "show_questions" }],
-          [{ text: "🏠 В начало", callback_data: "show_questions" }],
-        ],
-      },
-    };
-
-    // Обновляем сообщение с ответом
-    bot.editMessageText(resultMessage, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: "Markdown",
-      ...nextQuestionKeyboard,
-    });
-
-    bot.answerCallbackQuery(callbackQuery.id);
-    return;
-  }
-});
+// Callback query handler (telegraf da kerak emas, chunki biz ReplyKeyboard ishlatamiz)
 
 // Обработка текстовых сообщений (вопросов из клавиатуры)
-bot.on("text", (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-
-  // Пропускаем команду /start
-  if (text.startsWith("/")) {
-    return;
-  }
+bot.on('text', (ctx) => {
+  const chatId = ctx.chat.id;
+  const text = ctx.message.text;
 
   // Инициализируем состояние если его нет
   if (!userStates[chatId]) {
@@ -307,7 +220,7 @@ bot.on("text", (msg) => {
 
   // Обработка специальных кнопок
   if (text === "🔄 Показать меню") {
-    bot.sendMessage(chatId, "Выберите вопрос из меню ниже! 👇", createQuestionsReplyKeyboard());
+    ctx.reply("Выберите вопрос из меню ниже! 👇", createQuestionsReplyKeyboard());
     return;
   }
 
@@ -317,7 +230,7 @@ bot.on("text", (msg) => {
 🤔 Задано вопросов: ${userStates[chatId].questionsAnswered}
 💭 Получено ответов: ${userStates[chatId].questionsAnswered}`;
 
-    bot.sendMessage(chatId, stats, { parse_mode: "Markdown" });
+    ctx.replyWithMarkdown(stats);
     return;
   }
 
@@ -336,27 +249,25 @@ bot.on("text", (msg) => {
 💭 *${randomAnswer}*
 
 `;
-    // ⸻
 
-    // **Вопросов задано:** ${userStates[chatId].questionsAnswered}
-
-    bot.sendMessage(chatId, responseMessage, {
-      parse_mode: "Markdown",
-    });
+    ctx.replyWithMarkdown(responseMessage);
   } else {
     // Если текст не является вопросом
-    bot.sendMessage(chatId, "Пожалуйста, выберите вопрос из меню ниже! 🤔");
+    ctx.reply("Пожалуйста, выберите вопрос из меню ниже! 🤔");
   }
 });
 
 // Обработка ошибок
-bot.on("error", (error) => {
-  console.error("Ошибка бота:", error);
+bot.catch((err, ctx) => {
+  console.error('Ошибка бота:', err);
 });
 
-bot.on("polling_error", (error) => {
-  console.error("Ошибка polling:", error);
-});
+// Запуск бота
+bot.launch();
 
 console.log("✅ Бот Сони Мармеладовой запущен!");
 console.log("📚 Готов отвечать на ваши вопросы...");
+
+// Graceful stop
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
